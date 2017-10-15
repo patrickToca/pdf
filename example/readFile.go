@@ -2,11 +2,18 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
+)
+
+var (
+	ref             Lines = make(Lines, 0)
+	sentenceCounter uint32
 )
 
 func main() {
@@ -14,14 +21,37 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(content)
+	fmt.Println(len(content))
 	return
 }
 
-type PageLines struct {
-	PageID      int
-	ColumnTexts []string
-	LineTexts   []string
+type Reference struct {
+	ID         string
+	PageNumber int
+	LineNumber uint32
+	LineText   []string
+}
+
+// Lines is a map with a string Key="PageNumber-LineNumber"
+type Lines map[string][]*Reference
+
+func (line Lines) AddReference(pageNumber int, lineNumber uint32, lineText []string) error {
+	ID := fmt.Sprintf("%d-%d", pageNumber, lineNumber)
+	log.Printf("%s\n", ID)
+
+	err := errors.New("Duplicate? This Line already exists!")
+
+	ref, exist := line[ID]
+	if exist {
+		return err
+	}
+	line[ID] = append(ref, &Reference{
+		ID:         ID,
+		PageNumber: pageNumber,
+		LineNumber: lineNumber,
+		LineText:   lineText,
+	})
+	return nil
 }
 
 func readPdf1(path string) (string, error) {
@@ -36,7 +66,9 @@ func readPdf1(path string) (string, error) {
 }
 
 func readPdf2(path string) (string, error) {
-	pagesL := []PageLines{}
+
+	reference := new(Reference)
+	lines := make(Lines)
 
 	r, err := pdf.Open(path)
 	if err != nil {
@@ -44,46 +76,31 @@ func readPdf2(path string) (string, error) {
 	}
 	totalPage := r.NumPage()
 
-
 	for pageIndex := 1; pageIndex <= totalPage; pageIndex++ {
-		pageLines := new(PageLines)
+
+		reference.PageNumber = pageIndex
+
 		p := r.Page(pageIndex)
 		if p.V.IsNull() {
 			continue
 		}
-		pageLines.PageID = pageIndex
-
 		var lastTextStyle pdf.Text
-
 		texts := p.Content().Text
-
 		for _, text := range texts {
-			if text.FontSize > 7.4400 {
-				continue
-			}
-
 			if isSameSentence(text.S, lastTextStyle.S) {
 				lastTextStyle.S = lastTextStyle.S + text.S
 			} else {
-				switch text.Font {
-				case "Arial-BoldMT":
-					line := fmt.Sprintf("Font: %s, Font-size: %f, x: %f, y: %f, content: %s \n", lastTextStyle.Font, lastTextStyle.FontSize, lastTextStyle.X, lastTextStyle.Y, lastTextStyle.S)
-					lastTextStyle = text
-					pageLines.ColumnTexts = append(pageLines.ColumnTexts, line)
-				case "ArialMT":
-					line := fmt.Sprintf("Font: %s, Font-size: %f, x: %f, y: %f, content: %s \n", lastTextStyle.Font, lastTextStyle.FontSize, lastTextStyle.X, lastTextStyle.Y, lastTextStyle.S)
-					lastTextStyle = text
-					pageLines.LineTexts = append(pageLines.LineTexts, line)
+				reference.LineNumber = atomic.AddUint32(&sentenceCounter, 1)
+				reference.LineText = append(reference.LineText, lastTextStyle.S)
+				//fmt.Printf("Font: %s, Font-size: %f, x: %f, y: %f, content: %s \n", lastTextStyle.Font, lastTextStyle.FontSize, lastTextStyle.X, lastTextStyle.Y, lastTextStyle.S)
+				lastTextStyle = text
+				if err := lines.AddReference(reference.PageNumber, reference.LineNumber, reference.LineText); err != nil {
+					log.Printf("lines.AddReference() error: %s\n", err)
 				}
 			}
-			pagesL = append(pagesL, *pageLines)
 		}
-		if pageLines.PageID == 1 {
-			log.Printf("for [%d] - len(pageLines.LineTexts) is: %d\nContent is: %s\n------\n", pageLines.PageID, len(pageLines.ColumnTexts), pageLines.ColumnTexts)
-		}
-
 	}
-
+	fmt.Printf("This Line is: %s\n", lines["12-11367"])
 	return "", nil
 }
 
