@@ -11,7 +11,8 @@ Features
 `go get -u github.com/ledongthuc/pdf`
 
 
-## Read plain text
+## Example
+### Read plain text
 
 ```golang
 package main
@@ -44,7 +45,7 @@ func readPdf(path string) (string, error) {
 }
 ```
 
-## Read all text with styles from PDF
+### Read all text with styles from PDF
 
 ```golang
 func readPdf2(path string) (string, error) {
